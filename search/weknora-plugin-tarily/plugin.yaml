@@ -1,0 +1,38 @@
+api_version: weknora.plugin/v1
+id: weknora.tarily
+name: TARily Web Search
+version: 1.0.0
+extension_type: search
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./weknora-plugin-tarily
+capabilities: [search]
+metadata:
+  provider_type: TARily
+  description: Tavily Search API plugin, aliased as TARily to avoid collision with the built-in Tavily provider
+  docs_url: https://tavily.com/
+  icon: tarily.png
+permissions:
+  network: allowlist
+  allowed_destinations:
+    - "api.tavily.com"
+config_schema:
+  type: object
+  properties:
+    credentials:
+      type: object
+      required: [api_key]
+      properties:
+        api_key:
+          type: string
+          secret: true
+          description: Tavily Search API Key
+    settings:
+      type: object
+      properties:
+        base_url:
+          type: string
+          description: Optional Tavily API endpoint override (defaults to https://api.tavily.com/search)
+        proxy_url:
+          type: string
+          description: Optional HTTP/HTTPS proxy URL for outbound requests

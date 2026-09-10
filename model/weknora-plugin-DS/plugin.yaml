@@ -1,0 +1,49 @@
+api_version: weknora.plugin/v1
+id: ds.deepseek
+name: DeepSeek (DS)
+version: 1.0.0
+extension_type: model
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./weknora-plugin-ds
+
+capabilities:
+  - chat
+
+model_ui:
+  features:
+    - thinking
+    - streaming
+  host_fields:
+    base_url:
+      mode: required
+      default: https://api.deepseek.com/v1
+    api_key:
+      mode: required
+    custom_headers:
+      mode: optional
+    supports_vision:
+      mode: optional
+    max_concurrency:
+      mode: optional
+
+metadata:
+  provider: ds
+  description: DeepSeek chat model provider (alias DS), OpenAI-compatible API.
+
+config_schema:
+  type: object
+  properties:
+    credentials:
+      type: object
+      required: [api_key]
+      properties:
+        api_key:
+          type: string
+          secret: true
+          description: DeepSeek API Key
+
+permissions:
+  network: allowlist
+  allowed_destinations:
+    - "api.deepseek.com"

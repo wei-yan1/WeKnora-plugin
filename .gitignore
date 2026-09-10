@@ -1,0 +1,38 @@
+# ============================================================
+# WeKnora 插件集合 - Git 忽略规则
+#
+# 编译产物（Go 静态二进制）每个 15~40MB，可由源码用 go build 随时
+# 重新生成，因此不进入版本库。源码本身只有约 13MB。
+# ============================================================
+
+# --- 各插件的 Linux 二进制（无扩展名）---
+# 用完整路径精确匹配，避免误伤同名的插件目录本身。
+datasource/weknora-plugin-dingtalk/weknora-plugin-dingtalk
+datasource/weknora-plugin-github/weknora-plugin-github
+datasource/weknora-plugin-localdir/weknora-plugin-localdir
+model/weknora-plugin-DS/weknora-plugin-ds
+parser/weknora-plugin-builtinb/builtinb
+retriever/weknora-plugin-milvux/weknora-plugin-milvux
+search/weknora-plugin-tarily/weknora-plugin-tarily
+search/weknora-plugin-tarily123/weknora-plugin-tarily
+
+# --- Windows 二进制 ---
+*.exe
+
+# --- 通用构建产物 ---
+bin/
+dist/
+build/
+*.so
+*.dylib
+*.dll
+*.test
+*.out
+*.log
+
+# --- 意外产生的空文件残渣（命令误操作）---
+/search/weknora-plugin-tarily123/=
+/search/weknora-plugin-tarily123/ERROR
+/search/weknora-plugin-tarily123/transferring
+/search/weknora-plugin-tarily123/\[auth\]
+/search/weknora-plugin-tarily123/\[internal\]

@@ -1,0 +1,30 @@
+api_version: weknora.plugin/v1
+id: weknora.localdir
+name: Local Directory Data Source
+version: 1.0.0
+extension_type: datasource
+protocol_version: v1
+entrypoint: ./weknora-plugin-localdir
+weknora_version: ">=0.7 <1.0"
+permissions:
+  network: none
+  read_paths: ["configured-root"]
+config_schema:
+  type: object
+  properties:
+    settings:
+      type: object
+      required: [root]
+      properties:
+        root:
+          type: directory
+          description: Directory to synchronize
+        include_extensions:
+          type: string[]
+          description: Optional file extensions such as .md or .txt
+capabilities: [incremental, deletion_sync]
+metadata:
+  connector_type: weknora.localdir
+  description: Sync files from a local directory on the server
+  auth_type: none
+  priority: 13

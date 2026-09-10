@@ -1,0 +1,53 @@
+api_version: weknora.plugin/v1
+id: weknora.milvux
+name: Milvux
+version: 1.0.1
+extension_type: retriever
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./weknora-plugin-milvux
+capabilities: [vector, keywords, filter]
+metadata:
+  engine_type: milvux
+  provider_type: Milvux
+  description: Milvus-compatible retriever plugin, aliased as Milvux to avoid collision with the built-in Milvus engine
+  docs_url: https://milvus.io/
+  icon: m.png
+permissions:
+  network: allowlist
+  allowed_destinations:
+    - "*"
+config_schema:
+  type: object
+  properties:
+    settings:
+      type: object
+      required: [addr]
+      properties:
+        addr:
+          type: string
+          title: 服务地址
+          description: Milvus server address (host:port, e.g. localhost:19530)
+        database:
+          type: string
+          title: 数据库名
+          description: Milvus database name (empty uses the default database)
+    credentials:
+      type: object
+      properties:
+        username:
+          type: string
+          title: 用户名
+          description: Milvus username (empty for no auth)
+        password:
+          type: string
+          secret: true
+          title: 密码
+          description: Milvus password
+    index_config:
+      type: object
+      properties:
+        collection_name:
+          type: string
+          title: 集合名前缀
+          description: Collection base name (default weknora_embeddings)

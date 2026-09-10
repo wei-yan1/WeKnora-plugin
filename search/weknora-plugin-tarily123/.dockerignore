@@ -1,0 +1,10 @@
+# Exclude local binaries and artifacts from the Docker build context.
+weknora-plugin-tarily
+weknora-plugin-tarily.exe
+*.exe
+tarily.png
+README.md
+main_test.go
+Dockerfile
+build.sh
+.dockerignore

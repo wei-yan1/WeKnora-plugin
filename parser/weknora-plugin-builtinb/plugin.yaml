@@ -1,0 +1,41 @@
+api_version: weknora.plugin/v1
+id: example.builtin-b-parser
+name: BuiltinB
+version: 0.1.0
+extension_type: parser
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./builtinb
+
+capabilities:
+  - parse
+
+metadata:
+  engine_name: builtinb
+  description: Independent BuiltinB parser used to validate the external plugin framework
+  file_types:
+    - md
+    - markdown
+    - txt
+    - csv
+    - json
+
+config_schema:
+  type: object
+  properties:
+    settings:
+      type: object
+      properties:
+        trim_whitespace:
+          type: boolean
+          title: Trim surrounding whitespace
+          description: Remove whitespace at the beginning and end of text
+          default: true
+        title_prefix:
+          type: string
+          title: Title prefix
+          description: Optional text added inside the first Markdown heading
+          default: ""
+
+permissions:
+  network: none

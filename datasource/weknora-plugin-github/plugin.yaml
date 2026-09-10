@@ -1,0 +1,41 @@
+api_version: weknora.plugin/v1
+id: weknora.github-datasource
+name: GitHub Data Source
+version: 0.1.0
+extension_type: datasource
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./weknora-plugin-github
+metadata:
+  connector_type: weknora.github
+  description: Sync repositories from GitHub as a knowledge source
+  icon: githu.png
+permissions:
+  network: allowlist
+  allowed_destinations:
+    - "api.github.com:443"
+  data:
+    tenants: [self]
+    knowledge_bases: [self]
+    data_sources: [self]
+config_schema:
+  type: object
+  properties:
+    settings:
+      type: object
+      required: [repositories]
+      additionalProperties: false
+      properties:
+        repositories:
+          type: array
+          description: Comma-separated repositories as owner/repo or owner/repo:branch
+    credentials:
+      type: object
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          secret: true
+          title: Access Token
+          description: GitHub Personal Access Token (optional for public repositories)
+capabilities: [incremental, deletion_sync]

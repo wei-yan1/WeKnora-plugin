@@ -1,0 +1,48 @@
+api_version: weknora.plugin/v1
+id: weknora.dingtalk-datasource
+name: DingTalk Data Source
+version: 1.0.0
+extension_type: datasource
+protocol_version: v1
+weknora_version: ">=0.7 <1.0"
+entrypoint: ./weknora-plugin-dingtalk
+metadata:
+  connector_type: weknora.dingtalk
+  icon: icon.png
+  description: Synchronize documents from DingTalk Wiki into a WeKnora knowledge base.
+  docs_url: https://open.dingtalk.com/document/
+permissions:
+  network: allowlist
+  allowed_destinations:
+    - "api.dingtalk.com:443"
+  data:
+    tenants: [self]
+    knowledge_bases: [self]
+    data_sources: [self]
+config_schema:
+  type: object
+  properties:
+    settings:
+      type: object
+      additionalProperties: false
+      properties: {}
+    credentials:
+      type: object
+      additionalProperties: false
+      required: [app_key, app_secret, union_id]
+      properties:
+        app_key:
+          type: string
+          title: AppKey
+          description: DingTalk application AppKey (Client ID)
+        app_secret:
+          type: string
+          secret: true
+          title: AppSecret
+          description: DingTalk application AppSecret (Client Secret)
+        union_id:
+          type: string
+          title: Operator UnionID
+          description: Operator unionId (操作人 UnionID)
+capabilities: [incremental]
+
