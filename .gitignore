@@ -29,10 +29,3 @@ build/
 *.test
 *.out
 *.log
-
-# --- 意外产生的空文件残渣（命令误操作）---
-/search/weknora-plugin-tarily123/=
-/search/weknora-plugin-tarily123/ERROR
-/search/weknora-plugin-tarily123/transferring
-/search/weknora-plugin-tarily123/\[auth\]
-/search/weknora-plugin-tarily123/\[internal\]
