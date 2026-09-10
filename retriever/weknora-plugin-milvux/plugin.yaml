@@ -9,9 +9,7 @@ entrypoint: ./weknora-plugin-milvux
 capabilities: [vector, keywords, filter]
 metadata:
   engine_type: milvux
-  provider_type: Milvux
   description: Milvus-compatible retriever plugin, aliased as Milvux to avoid collision with the built-in Milvus engine
-  docs_url: https://milvus.io/
   icon: m.png
 permissions:
   network: allowlist
