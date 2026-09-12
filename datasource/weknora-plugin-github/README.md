@@ -19,8 +19,11 @@ cd datasource/weknora-plugin-github
 go build -o weknora-plugin-github.exe .
 ```
 
-`go.mod` 里 `replace github.com/Tencent/WeKnora => D:/WeKnora-fork` 指向本机主仓，
-仅用于引入 `pkg/pluginapi` SDK；运行时插件只通过 gRPC 与主仓通信。
+`go.mod` 里 `replace github.com/Tencent/WeKnora => ../../../WeKnora-fork` 指向与本仓库**同级**的主仓检出。
+用相对路径而不是绝对路径（如 `D:/WeKnora-fork`），是为了在别的机器、WSL 和容器里都能直接构建——
+绝对路径一旦换环境就会报 `replacement directory ... does not exist`。
+
+`replace` 仅用于引入 `pkg/pluginapi` SDK；运行时插件只通过 gRPC 与主仓通信。
 
 ## 配置
 
@@ -57,5 +60,6 @@ credentials:
 ## 已知限制
 
 - `git/trees?recursive=1` 返回 `truncated=true` 时（超大仓库）会报错，建议改用较小的分支/仓库；
-- `contents` 接口有 1MB 单文件上限，超大文件会拉取失败（该文件跳过）；
+- `contents` 接口对 1 MiB 以上的文件不下发内联内容（`encoding: none`），只给 `download_url`。这类文件**不会被跳过**：插件把它们作为「只带 URL 的条目」交给宿主，由 WeKnora 自行下载解析（见 `item()` 与数据源指南的「URL 无内容」约定）。既不会静默丢文件，也不会因为一个超大文件让整个仓库同步失败；
+- 单个文件拉取失败（网络错误、base64 解码失败、API 未给出 `download_url` 等）**不会中断整批**：插件把它作为「失败占位项」上报（无内容 + `Metadata["error"]`），宿主计入失败数并保留上一轮 cursor，下一轮增量会重试该文件；
 - 文件类型白名单与内置 GitLab connector 一致（md/pdf/docx/xlsx/图片/音频等，见 `supportedFileExtensions`）。

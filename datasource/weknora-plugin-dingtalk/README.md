@@ -33,8 +33,11 @@ $env:GOARCH = "amd64"
 go build -o weknora-plugin-dingtalk .
 ```
 
-`go.mod` 里 `replace github.com/Tencent/WeKnora => D:/WeKnora-fork` 指向本机主仓，
-仅用于引入 `pkg/pluginapi` SDK；运行时插件只通过 gRPC 与主仓通信，不链接宿主主程序。
+`go.mod` 里 `replace github.com/Tencent/WeKnora => ../../../WeKnora-fork` 指向与本仓库**同级**的主仓检出。
+用相对路径而不是绝对路径（如 `D:/WeKnora-fork`），是为了在别的机器、WSL 和容器里都能直接构建——
+绝对路径一旦换环境就会报 `replacement directory ... does not exist`。本仓库 8 个插件统一使用该相对路径。
+
+`replace` 仅用于引入 `pkg/pluginapi` SDK；运行时插件只通过 gRPC 与主仓通信，不链接宿主主程序。
 
 ## 前端展示元数据
 
@@ -114,4 +117,5 @@ go build -o weknora-plugin-dingtalk .
 
 - **钉钉在线文档（ALIDOC / `.adoc`）**：当前统一走 `storage` 下载接口；若该接口对
   在线文档不支持，需要改用钉钉文档「导出」或「块元素」接口单独处理，待开通权限后实测。
-- 文件下载失败的项会跳过（不阻塞整次同步）；正式使用建议按需把跳过项改为返回 warning。
+- 单个 workspace 或文档拉取失败**不会中断整轮同步**：插件以「失败占位项」上报（无内容 + `Metadata["error"]`），宿主会把它计入失败数、写进同步日志（前端可见），并因为存在失败项而**保留上一轮的 cursor**，下一轮增量重拉同一批、自动重试。既不会静默跳过，也不会让一个坏文档卡住全部同步。
+  > 宿主**不消费** `Response.Warnings`（已核实 `datasource_service.go`），部分失败必须走 `Metadata["error"]` 这条约定，不能依赖 `Warnings`。这也是内置 Yuque / Feishu 连接器的做法。
