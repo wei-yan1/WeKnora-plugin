@@ -4,8 +4,18 @@
 
 ## 构建
 
-```powershell
+部署到 WSL / Docker 时要的是**无扩展名的 Linux 二进制**（`plugin.yaml` 的 `entrypoint: ./weknora-plugin-github` 指向它）；`.exe` 只用于本机调试。
+
+```bash
+cd datasource/weknora-plugin-github
 go mod tidy
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o weknora-plugin-github .
+```
+
+本机（Windows）调试：
+
+```powershell
+cd datasource/weknora-plugin-github
 go build -o weknora-plugin-github.exe .
 ```
 

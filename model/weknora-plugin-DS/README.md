@@ -13,9 +13,19 @@ OpenAI 兼容 API。为避免与主仓内置的 `deepseek` provider 冲突，本
 
 ## 构建
 
+部署到 WSL / Docker 时要的是**无扩展名的 Linux 二进制**（`plugin.yaml` 的 `entrypoint: ./weknora-plugin-ds` 指向它）；`.exe` 只用于本机调试。
+
 ```bash
-cd D:\weknora-plugins\model
-go build -o weknora-plugin-ds .
+cd model/weknora-plugin-DS
+go mod tidy
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o weknora-plugin-ds .
+```
+
+本机（Windows）调试：
+
+```powershell
+cd model/weknora-plugin-DS
+go build -o weknora-plugin-ds.exe .
 ```
 
 ## 测试

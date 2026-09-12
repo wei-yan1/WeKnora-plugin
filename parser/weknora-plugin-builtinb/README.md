@@ -7,9 +7,18 @@ external plugin framework. It is deliberately small: it accepts `md`,
 
 ## Build
 
-From this directory:
+Build the **Linux binary** — this is what `plugin.yaml`'s `entrypoint`
+(`./builtinb`) points at, and what the host actually runs under WSL / Docker:
+
+```bash
+cd parser/weknora-plugin-builtinb
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o builtinb .
+```
+
+Windows (local debugging only):
 
 ```powershell
+cd parser/weknora-plugin-builtinb
 go test ./...
 go build -o builtinb.exe .
 ```
@@ -20,14 +29,14 @@ released SDK version instead.
 
 ## Install
 
-Keep `plugin.yaml` and `builtinb.exe` together, then point the host at the
-parser plugin root:
+Keep `plugin.yaml` and the Linux binary `builtinb` together, then point the host
+at the parser plugin root:
 
 ```powershell
 $env:WEKNORA_PLUGIN_DIR_PARSER = "D:\weknora-plugins\parser"
 ```
 
-The host discovers `plugin.yaml`, starts `builtinb.exe`, performs the shared
+The host discovers `plugin.yaml`, starts `./builtinb`, performs the shared
 handshake and health checks, and registers the engine as `builtinb`.
 
 ## Configuration

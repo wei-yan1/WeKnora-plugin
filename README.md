@@ -67,24 +67,34 @@ isolated 形态还需要设置 `WEKNORA_PLUGIN_RUNTIME_AGENT_TOKEN`（app 与 pl
 
 ## 构建要求
 
+**每个插件都必须编译出 Linux/amd64 二进制，这是它被装载的唯一形态。** 宿主跑在 WSL 或容器里，两者都是 Linux，`plugin.yaml` 的 `entrypoint` 指向的文件必须能在 Linux 上执行：
+
+```yaml
+entrypoint: ./weknora-plugin-dingtalk    # 无扩展名的 Linux 二进制
+```
+
+Windows 的 `.exe` 只是本机调试产物，部署时不会被采用（可以留在目录里，不冲突）。因此每个插件目录的部署形态是「`plugin.yaml` + 图标 + **无扩展名的 Linux 二进制**」：
+
+```text
+weknora-plugin-dingtalk/
+├── plugin.yaml
+├── weknora-plugin-dingtalk    # Linux/amd64 可执行文件，entrypoint 指向它
+└── icon.png
+```
+
+构建方式（各插件统一，进入插件目录执行）：
+
+```bash
+cd <插件目录>          # 如 datasource/weknora-plugin-dingtalk
+go mod tidy
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o <二进制名> .
+```
+
+`CGO_ENABLED=0` 产出静态链接二进制，避免宿主容器内缺少 glibc 依赖；输出名要与 `plugin.yaml` 的 `entrypoint` 完全一致。各插件 README 里有针对自己的完整命令。
+
 **容器不会替插件编译。** 插件目录内必须已有可执行文件，否则宿主能发现 `plugin.yaml` 但装载失败（日志中可见）。
 
-- **ProcessRuntime（offline / trusted）**：目录内需有 **Linux/amd64** 可执行文件，先在插件目录构建：
+- **ProcessRuntime（offline / trusted）**：直接用上面那个 Linux 二进制，作为 app 容器的子进程运行。
+- **isolated（DockerRuntime）**：用插件目录内的 `Dockerfile` 构建镜像（镜像内同样是 Linux 二进制），并把镜像引用写入 `plugin.yaml` 的 `entrypoint`，形如 `docker://<image>:<tag>`。
 
-  ```bash
-  cd datasource/weknora-plugin-dingtalk
-  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o weknora-plugin-dingtalk .
-  ```
-
-  最终插件目录至少包含：
-
-  ```text
-  weknora-plugin-dingtalk/
-  ├── plugin.yaml
-  ├── weknora-plugin-dingtalk    # Linux/amd64 可执行文件
-  └── icon.png
-  ```
-
-- **isolated（DockerRuntime）**：用插件目录内的 `Dockerfile` 构建镜像，并把镜像引用写入 `plugin.yaml` 的 `entrypoint`。
-
-本地（非容器）调试时构建当前平台的可执行文件即可，例如 Windows 下 `go build -o weknora-plugin-dingtalk.exe .`。各插件的具体构建、配置与验证步骤见其目录内 README。
+本机（Windows）调试时才构建当前平台的产物，例如 `go build -o weknora-plugin-dingtalk.exe .`。
