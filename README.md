@@ -27,6 +27,13 @@ WeKnora-plugin/
 
 顶层目录名（`datasource/`、`parser/` …）刻意与宿主容器内的默认插件路径 `/app/plugins/<type>` 一致，因此**直接挂载本仓库根目录即可**，五个路径变量保持默认。
 
+### 命名说明
+
+插件名刻意不与宿主内置实现重名，以便外部插件与内置实现同时存在、互不覆盖：
+
+- `milvux`（`weknora.milvux`）、`builtinb`（`example.builtin-b-parser`）：分别是内置 `milvus` 检索引擎、内置解析引擎的等价外部实现，用别名避开重名，同时验证外部插件链路真实生效。
+- `tarily` / `tarily123`：同一能力（Tavily 搜索，`provider_type: TARily` 同样为避开内置 Tavily provider）的两份副本，用来验证两条运行时路径——`tarily` 的 `entrypoint` 是 `./weknora-plugin-tarily`，走 **offline / trusted 进程态**（ProcessRuntime）；`tarily123` 的 `entrypoint` 是 `docker://weknora-plugin-tarily:latest`，走 **isolated OCI 容器**（DockerRuntime），用于验证 `--network none`、egress 代理、control socket 权限移交等强隔离控制点是否有效。两者 id 不同，可同时装载。
+
 ## 宿主如何发现插件
 
 宿主启动时按扩展类型扫描五个环境变量指向的目录，每个目录下平铺放置独立插件包，插件的扩展类型以 Manifest 的 `extension_type` 为准：

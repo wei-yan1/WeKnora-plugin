@@ -22,7 +22,7 @@ the plugin keeps no tenant state.
 From the repository root:
 
 ```powershell
-Push-Location plugins/weknora-plugin-tarily
+Push-Location search/weknora-plugin-tarily
 go build -buildvcs=false -mod=mod -o weknora-plugin-tarily.exe .
 Pop-Location
 ```
@@ -30,7 +30,7 @@ Pop-Location
 For Linux:
 
 ```bash
-cd plugins/weknora-plugin-tarily
+cd search/weknora-plugin-tarily
 go build -buildvcs=false -mod=mod -o weknora-plugin-tarily .
 ```
 

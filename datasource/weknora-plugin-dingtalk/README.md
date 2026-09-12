@@ -82,31 +82,19 @@ go build -o weknora-plugin-dingtalk .
 1. 保持整个 `weknora-plugin-dingtalk` 目录完整（Manifest、图标和与当前系统匹配的可执行文件必须同目录），并放入插件根目录，例如 `D:\weknora-plugins\datasource\weknora-plugin-dingtalk`；
 2. 设置宿主插件目录。宿主按**扩展类型**读取五个独立变量，**没有 `WEKNORA_PLUGIN_DIRS` 这个变量**——写错名字不会报错，只会表现为「插件不被发现」，排查时极易误判为 Manifest 或二进制问题。
 
-   本机直接运行宿主（指向插件仓库里对应类型的那一层目录）：
+   本机以进程态运行宿主时，五个变量各指向插件仓库中对应类型的那一层目录：
 
    ```powershell
    $env:WEKNORA_PLUGIN_DIR_DATASOURCE = "D:\weknora-plugins\datasource"
+   $env:WEKNORA_PLUGIN_DIR_PARSER     = "D:\weknora-plugins\parser"
+   $env:WEKNORA_PLUGIN_DIR_SEARCH     = "D:\weknora-plugins\search"
+   $env:WEKNORA_PLUGIN_DIR_MODEL      = "D:\weknora-plugins\model"
+   $env:WEKNORA_PLUGIN_DIR_RETRIEVER  = "D:\weknora-plugins\retriever"
    ```
 
-   Docker Compose 部署：变量填**容器内**路径，插件仓库根目录经 `WEKNORA_PLUGIN_HOST_DIR` 只读挂载，其顶层目录名（`datasource/`、`parser/`…）与下面默认值一一对应，因此挂上去后五个变量保持默认即可：
+   不需要的类型把对应变量置空即可（空值 = 不扫描该类型）；五个全空时宿主视为「未安装插件」，照常启动。
 
-   ```env
-   WEKNORA_PLUGIN_HOST_DIR=../WeKnora-plugin   # 宿主侧：插件仓库根目录（WSL 形如 /mnt/d/WeKnora-plugin）
-   WEKNORA_PLUGIN_MOUNT_DIR=/app/plugins       # 容器内挂载点，须与 WEKNORA_PLUGIN_DIR_* 前缀一致
-   WEKNORA_PLUGIN_DIR_DATASOURCE=/app/plugins/datasource
-   ```
-
-   五个变量与默认容器内路径：
-
-   | 扩展类型 | 环境变量 | 默认容器内路径 |
-   | --- | --- | --- |
-   | datasource | `WEKNORA_PLUGIN_DIR_DATASOURCE` | `/app/plugins/datasource` |
-   | parser | `WEKNORA_PLUGIN_DIR_PARSER` | `/app/plugins/parser` |
-   | search | `WEKNORA_PLUGIN_DIR_SEARCH` | `/app/plugins/search` |
-   | model | `WEKNORA_PLUGIN_DIR_MODEL` | `/app/plugins/model` |
-   | retriever | `WEKNORA_PLUGIN_DIR_RETRIEVER` | `/app/plugins/retriever` |
-
-   某类不需要插件时把对应变量置空即可（空值 = 不扫描该类型）；五个变量全为空时宿主视为「未安装插件」，正常启动。
+   Docker Compose 部署（变量填容器内路径、只读挂载独立插件仓库）：见仓库根 [README](../../README.md) 的「宿主如何发现插件」一节。
 
 3. 启动/刷新 WeKnora，宿主发现并启动插件；
 4. 前端新建数据源，选择 `DingTalk Data Source`，填写 AppKey / AppSecret / UnionID；

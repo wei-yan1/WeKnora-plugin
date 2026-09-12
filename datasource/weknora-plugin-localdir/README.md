@@ -8,8 +8,8 @@ external ID.
 Build from the repository root:
 
 ```powershell
-go build -o weknora-plugin-localdir.exe ./plugins/weknora-plugin-localdir
-docker build -f plugins/weknora-plugin-localdir/Dockerfile -t weknora/localdir:dev .
+go build -o weknora-plugin-localdir.exe ./datasource/weknora-plugin-localdir
+docker build -f datasource/weknora-plugin-localdir/Dockerfile -t weknora/localdir:dev .
 ```
 
 The host starts the process/container and supplies `WEKNORA_PLUGIN_ADDR`. The
