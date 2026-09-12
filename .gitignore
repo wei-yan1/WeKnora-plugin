@@ -29,3 +29,7 @@ build/
 *.test
 *.out
 *.log
+
+# --- IDE / 编辑器本地配置 ---
+# JetBrains 的 .idea 只含个人工作区配置，不应进入版本库。
+.idea/
