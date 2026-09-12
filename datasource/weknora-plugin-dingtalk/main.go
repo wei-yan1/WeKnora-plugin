@@ -34,8 +34,6 @@ func main() {
 		OnResolveResourceAncestors: handler.ResolveResourceAncestors,
 		OnFetchAll:                 handler.FetchAll,
 		OnFetchIncremental:         handler.FetchIncremental,
-		OnFetchAllStream:           handler.FetchAllStream,
-		OnFetchIncrementalStream:   handler.FetchIncrementalStream,
 	}); err != nil {
 		panic(err)
 	}
@@ -51,7 +49,7 @@ func loadConfig(request pluginapi.Request) (*dingtalkConfig, error) {
 	if !ok || credentials == nil {
 		return nil, errors.New("credentials is required")
 	}
-	cfg := &dingtalkConfig{BaseURL: "https://api.dingtalk.com"}
+	cfg := &dingtalkConfig{}
 	if v, ok := credentials["app_key"].(string); ok {
 		cfg.AppKey = strings.TrimSpace(v)
 	}
@@ -193,11 +191,14 @@ func (h *dingtalkHandler) FetchAll(ctx context.Context, request pluginapi.Reques
 	if err != nil {
 		return nil, err
 	}
-	_, items, _, err := h.sync(ctx, cfg, request.ResourceIDs, dingTalkCursor{}, false)
+	_, items, err := h.sync(ctx, cfg, request.ResourceIDs, dingTalkCursor{}, false)
 	return items, err
 }
 
-// FetchIncremental is the unary fallback for hosts without streaming.
+// FetchIncremental returns the items changed since the cursor's revision.
+//
+// 本插件不在 manifest 里声明 streaming，因此走批量路径：宿主只调用
+// FetchAll / FetchIncremental，cursor 由这里返回、下一轮原样传回。
 func (h *dingtalkHandler) FetchIncremental(ctx context.Context, request pluginapi.Request) ([]pluginapi.FetchedItem, map[string]any, error) {
 	cfg, err := loadConfig(request)
 	if err != nil {
@@ -207,60 +208,36 @@ func (h *dingtalkHandler) FetchIncremental(ctx context.Context, request pluginap
 	if err != nil {
 		return nil, nil, err
 	}
-	cursor, items, _, err := h.sync(ctx, cfg, request.ResourceIDs, prev, true)
+	cursor, items, err := h.sync(ctx, cfg, request.ResourceIDs, prev, true)
 	return items, encodeCursor(cursor), err
 }
 
-// FetchAllStream emits items (and warnings) via the streaming channel.
-func (h *dingtalkHandler) FetchAllStream(ctx context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-	cfg, err := loadConfig(request)
-	if err != nil {
-		return err
-	}
-	_, items, warnings, err := h.sync(ctx, cfg, request.ResourceIDs, dingTalkCursor{}, false)
-	if err != nil {
-		return err
-	}
-	return emit(pluginapi.Response{Items: items, Warnings: warnings})
-}
-
-// FetchIncrementalStream emits items, cursor and warnings via streaming.
-func (h *dingtalkHandler) FetchIncrementalStream(ctx context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-	cfg, err := loadConfig(request)
-	if err != nil {
-		return err
-	}
-	prev, err := decodeCursor(request.Cursor)
-	if err != nil {
-		return err
-	}
-	cursor, items, warnings, err := h.sync(ctx, cfg, request.ResourceIDs, prev, true)
-	if err != nil {
-		return err
-	}
-	return emit(pluginapi.Response{Items: items, Cursor: encodeCursor(cursor), Warnings: warnings})
-}
-
 // sync drives both full and incremental synchronization.
+//
+// 失败语义：单个 workspace 或文档失败**不中断整轮**，而是以「失败占位项」上报
+// （见 documentFailureItem / workspaceFailureItem）。宿主对这类条目的处理是：
+// 计入 result.Failed、写进同步日志（前端可见），并且因为 Failed > 0 而**保留上一轮
+// 的 cursor**，下一轮增量会重拉同一批 —— 既不漏同步，也不必让整轮失败。
+//
+// 只有"连 workspace 列表都拿不到"这类全局故障才返回错误终止整轮。
 func (h *dingtalkHandler) sync(
 	ctx context.Context,
 	cfg *dingtalkConfig,
 	resourceIDs []string,
 	prev dingTalkCursor,
 	incremental bool,
-) (dingTalkCursor, []pluginapi.FetchedItem, []string, error) {
+) (dingTalkCursor, []pluginapi.FetchedItem, error) {
 	next := newCursor()
 	var items []pluginapi.FetchedItem
-	var warnings []string
 
 	workspaces, err := h.client.listWorkspaces(ctx, cfg)
 	if err != nil {
-		return next, nil, warnings, err
+		return next, nil, err
 	}
 
 	selectedRefs, err := h.resolveSelection(workspaces, resourceIDs)
 	if err != nil {
-		return next, nil, warnings, err
+		return next, nil, err
 	}
 
 	for _, ref := range selectedRefs {
@@ -274,10 +251,11 @@ func (h *dingtalkHandler) sync(
 
 		docs, complete, err := h.collectScope(ctx, cfg, ref)
 		if err != nil {
+			// 该 workspace 本轮失败：保留上一轮状态并上报占位项，其余 workspace 照常同步。
 			if prevRes != nil {
 				next.Resources[ref.WorkspaceID] = prevRes
 			}
-			warnings = append(warnings, fmt.Sprintf("workspace %s: %v", ref.WorkspaceID, err))
+			items = append(items, workspaceFailureItem(ref, err))
 			continue
 		}
 		cur.Complete = complete
@@ -296,12 +274,9 @@ func (h *dingtalkHandler) sync(
 
 			markdown, err := h.fetchDocument(ctx, cfg, d)
 			if err != nil {
-				if prevRes != nil && prevRes.Nodes != nil {
-					if prevState, ok := prevRes.Nodes[d.NodeID]; ok {
-						cur.Nodes[d.NodeID] = prevState
-					}
-				}
-				warnings = append(warnings, fmt.Sprintf("document %s (%s): %v", d.Name, d.NodeID, err))
+				// 该文档本轮失败：上报占位项后继续，其余文档照常同步。不写 cur.Nodes，
+				// 所以下一轮它仍会被当作待同步项重新抓取。
+				items = append(items, documentFailureItem(d, err))
 				continue
 			}
 			cur.Nodes[d.NodeID] = state
@@ -328,7 +303,7 @@ func (h *dingtalkHandler) sync(
 		next.Resources[ref.WorkspaceID] = cur
 	}
 
-	return next, items, warnings, nil
+	return next, items, nil
 }
 
 // docRef identifies a syncable document.
@@ -484,6 +459,34 @@ func deletedItem(d docRef) pluginapi.FetchedItem {
 	return pluginapi.FetchedItem{
 		ExternalID: "dingtalk:doc:" + d.WorkspaceID + ":" + d.NodeID,
 		IsDeleted:  true,
+	}
+}
+
+// documentFailureItem 与 workspaceFailureItem 实现「失败占位项」约定 —— 宿主与内置
+// 连接器（yuque、feishu）共用的部分失败上报方式：给出出问题那一项的 ExternalID 与
+// Title，**不带任何 Content**，只用 Metadata["error"] 说明原因。
+//
+// 宿主的处理（internal/application/service/datasource_service.go）：
+//  1. 计入 result.Failed 并把错误样本写入同步日志（状态 Partial，前端可见）；
+//  2. 因为无内容，不会创建任何知识条目，也不会动已入库的旧版本；
+//  3. 因为 result.Failed > 0，**不推进 cursor**，于是下一轮增量重拉同一批，
+//     失败项自然被重试（at-least-once）。
+//
+// 这解决了两个都不该选的极端：整体返回错误会让一个坏文档卡住全部同步；静默跳过则
+// 永远不再重试、还让宿主误报成功。
+func documentFailureItem(d docRef, cause error) pluginapi.FetchedItem {
+	return pluginapi.FetchedItem{
+		ExternalID: "dingtalk:doc:" + d.WorkspaceID + ":" + d.NodeID,
+		Title:      d.Name,
+		Metadata:   map[string]string{"error": cause.Error()},
+	}
+}
+
+func workspaceFailureItem(ref resourceRef, cause error) pluginapi.FetchedItem {
+	return pluginapi.FetchedItem{
+		ExternalID: "dingtalk:workspace:" + ref.WorkspaceID,
+		Title:      "workspace " + ref.WorkspaceID,
+		Metadata:   map[string]string{"error": cause.Error()},
 	}
 }
 

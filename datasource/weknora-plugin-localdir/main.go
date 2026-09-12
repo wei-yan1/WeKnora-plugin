@@ -31,12 +31,6 @@ func main() {
 		OnListResources:    plugin.ListResources,
 		OnFetchAll:         plugin.FetchAll,
 		OnFetchIncremental: plugin.FetchIncremental,
-		OnFetchAllStream: func(ctx context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-			return plugin.FetchAllStream(ctx, request, emit)
-		},
-		OnFetchIncrementalStream: func(ctx context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-			return plugin.FetchIncrementalStream(ctx, request, emit)
-		},
 	}); err != nil {
 		panic(err)
 	}
@@ -90,34 +84,14 @@ func (localDirectoryHandler) FetchAll(_ context.Context, request pluginapi.Reque
 	for _, file := range files {
 		item, err := readItem(root, file)
 		if err != nil {
-			return nil, err
+			// 单个文件读不出来（权限、被占用、超限…）不该拖垮整轮同步，
+			// 以失败占位项上报后继续处理其余文件。
+			items = append(items, failureItem(file, err))
+			continue
 		}
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func (localDirectoryHandler) FetchAllStream(_ context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-	root, extensions, err := settings(request)
-	if err != nil {
-		return err
-	}
-	files, err := scanFiles(root, extensions)
-	if err != nil {
-		return err
-	}
-	current := cursorState{Files: make(map[string]fileState, len(files))}
-	for _, file := range files {
-		item, err := readItem(root, file)
-		if err != nil {
-			return err
-		}
-		current.Files[item.ExternalID] = fileState{Hash: hashBytes(item.Content)}
-		if err := emit(pluginapi.Response{Items: []pluginapi.FetchedItem{item}}); err != nil {
-			return err
-		}
-	}
-	return emit(pluginapi.Response{Cursor: mapFromCursor(current)})
 }
 
 func (localDirectoryHandler) FetchIncremental(_ context.Context, request pluginapi.Request) ([]pluginapi.FetchedItem, map[string]any, error) {
@@ -144,7 +118,16 @@ func (localDirectoryHandler) FetchIncremental(_ context.Context, request plugina
 	for _, file := range files {
 		item, err := readItem(root, file)
 		if err != nil {
-			return nil, nil, err
+			// 读取失败的文件**在源端仍然存在**：必须把它算进 seen 并保留旧哈希，
+			// 否则下面的删除扫描会把它当作"已消失"而发出删除墓碑 —— 那会因为
+			// 一次临时读取失败就删掉用户已经入库的文档。
+			externalID := externalIDFor(file)
+			seen[externalID] = struct{}{}
+			if old, ok := previous.Files[externalID]; ok {
+				current.Files[externalID] = old
+			}
+			items = append(items, failureItem(file, err))
+			continue
 		}
 		seen[item.ExternalID] = struct{}{}
 		state := fileState{Hash: hashBytes(item.Content)}
@@ -160,52 +143,6 @@ func (localDirectoryHandler) FetchIncremental(_ context.Context, request plugina
 		}
 	}
 	return items, mapFromCursor(current), nil
-}
-
-func (localDirectoryHandler) FetchIncrementalStream(_ context.Context, request pluginapi.Request, emit func(pluginapi.Response) error) error {
-	root, extensions, err := settings(request)
-	if err != nil {
-		return err
-	}
-	files, err := scanFiles(root, extensions)
-	if err != nil {
-		return err
-	}
-	previous := cursorState{Files: map[string]fileState{}}
-	if request.Cursor != nil {
-		if err := decodeMap(request.Cursor, &previous); err != nil {
-			return err
-		}
-		if previous.Files == nil {
-			previous.Files = map[string]fileState{}
-		}
-	}
-	current := cursorState{Files: make(map[string]fileState, len(files))}
-	seen := make(map[string]struct{}, len(files))
-	for _, file := range files {
-		item, err := readItem(root, file)
-		if err != nil {
-			return err
-		}
-		seen[item.ExternalID] = struct{}{}
-		state := fileState{Hash: hashBytes(item.Content)}
-		current.Files[item.ExternalID] = state
-		if old, ok := previous.Files[item.ExternalID]; ok && old.Hash == state.Hash {
-			continue
-		}
-		if err := emit(pluginapi.Response{Items: []pluginapi.FetchedItem{item}}); err != nil {
-			return err
-		}
-	}
-	for externalID := range previous.Files {
-		if _, ok := seen[externalID]; ok {
-			continue
-		}
-		if err := emit(pluginapi.Response{Items: []pluginapi.FetchedItem{{ExternalID: externalID, IsDeleted: true}}}); err != nil {
-			return err
-		}
-	}
-	return emit(pluginapi.Response{Cursor: mapFromCursor(current)})
 }
 
 func settings(request pluginapi.Request) (string, map[string]any, error) {
@@ -251,18 +188,53 @@ func scanFiles(root string, extensions map[string]any) ([]string, error) {
 	return files, err
 }
 
+// maxFileBytes 限制单个文件的大小。宿主与 SDK 两侧的 gRPC 消息上限都是 50 MB，
+// 而批量路径把所有条目打包进**同一个**响应，所以必须留足余量。超过上限的文件会以
+// 「失败占位项」上报（见 failureItem），而不是把整轮同步撑爆成一条难排查的 gRPC 错误。
+//
+// 用 var 而非 const 是为了让测试能把上限调小到几字节，从而在不写 32 MiB 数据的前提下
+// 覆盖「超限 / 读取失败」这两条分支。
+var maxFileBytes int64 = 32 << 20 // 32 MiB
+
+// externalIDFor 是文件 ExternalID 的唯一构造处：readItem 与 failureItem 必须生成
+// 完全一致的 ID，否则失败项会和真实项对不上号。
+func externalIDFor(relative string) string {
+	return "file:" + filepath.ToSlash(relative)
+}
+
+// failureItem 以「失败占位项」上报单个文件的失败：不带任何内容，只用
+// Metadata["error"] 说明原因。这是宿主与内置连接器（yuque、feishu）共用的约定，
+// 宿主会把它计入 result.Failed、写进同步日志，并因为 Failed > 0 而**保留上一轮
+// 的 cursor**，下一轮增量重拉同一批 —— 该文件会被重试，而不是被永久跳过。
+func failureItem(relative string, cause error) pluginapi.FetchedItem {
+	return pluginapi.FetchedItem{
+		ExternalID: externalIDFor(relative),
+		Title:      filepath.Base(relative),
+		FileName:   filepath.Base(relative),
+		Metadata: map[string]string{
+			"path":  filepath.ToSlash(relative),
+			"error": cause.Error(),
+		},
+	}
+}
+
 func readItem(root, relative string) (pluginapi.FetchedItem, error) {
 	path := filepath.Join(root, relative)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return pluginapi.FetchedItem{}, err
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return pluginapi.FetchedItem{}, err
 	}
+	// 超限文件在读取前就拒绝：先读进内存再判断只会让宿主更早撞上 OOM / 消息上限。
+	if info.Size() > maxFileBytes {
+		return pluginapi.FetchedItem{}, fmt.Errorf(
+			"file %s is %d bytes, over the %d byte limit", filepath.ToSlash(relative), info.Size(), maxFileBytes)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return pluginapi.FetchedItem{}, err
+	}
 	return pluginapi.FetchedItem{
-		ExternalID: "file:" + filepath.ToSlash(relative),
+		ExternalID: externalIDFor(relative),
 		Title:      filepath.Base(relative),
 		FileName:   filepath.Base(relative),
 		Content:    data,

@@ -9,11 +9,12 @@ import (
 )
 
 // dingtalkConfig holds the resolved plugin configuration.
+//
+// Base URL 不在这里：插件恒用官方端点（见 client.go 的 cfgBaseURL）。
 type dingtalkConfig struct {
 	AppKey    string
 	AppSecret string
 	UnionID   string
-	BaseURL   string
 }
 
 // workspace is a DingTalk wiki workspace (knowledge base).

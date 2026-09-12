@@ -322,3 +322,23 @@ func TestPluginStreamEndToEnd(t *testing.T) {
 		t.Fatalf("reasoning_content lost through stream: %q", reasoning)
 	}
 }
+
+// TestOutboundHTTPClientIsGuarded 回归守卫：生产路径的出站客户端必须来自 SDK 的
+// NewPluginHTTPClient。network policy = none 时任何出站都应被守卫拦截；若有人把它
+// 换回裸 &http.Client{}，manifest 的 allowlist 会静默失效，而断言会立刻失败。
+func TestOutboundHTTPClientIsGuarded(t *testing.T) {
+	t.Setenv("WEKNORA_PLUGIN_NETWORK_POLICY", "none")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+
+	client := newOutboundHTTPClient()
+	resp, err := client.Get(srv.URL)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("guarded client must block outbound requests when network policy is none")
+	}
+	if !strings.Contains(err.Error(), "plugin network blocked") {
+		t.Fatalf("expected the SDK network guard to deny the request, got: %v", err)
+	}
+}

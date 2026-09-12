@@ -25,13 +25,6 @@ const (
 	userAgent = "weknora-github-datasource-plugin"
 )
 
-// errFileTooLarge is returned when GitHub's Contents API reports
-// encoding: "none" (i.e. the file is >1 MiB and must be downloaded
-// separately). We skip such files rather than streaming them through
-// the gRPC plugin boundary, which is bounded by the host's request
-// timeout.
-var errFileTooLarge = errors.New("file too large for inline fetch")
-
 func main() {
 	address := flag.String("address", os.Getenv("WEKNORA_PLUGIN_ADDR"), "gRPC listen address")
 	flag.Parse()
@@ -247,9 +240,6 @@ func (h *githubHandler) FetchAll(ctx context.Context, request pluginapi.Request)
 		for _, file := range files {
 			item, err := h.item(ctx, cfg, sel, file)
 			if err != nil {
-				if errors.Is(err, errFileTooLarge) {
-					continue
-				}
 				return nil, err
 			}
 			items = append(items, item)
@@ -322,9 +312,6 @@ func (h *githubHandler) fetchAllFor(ctx context.Context, cfg *githubConfig, sel 
 	for _, file := range files {
 		item, err := h.item(ctx, cfg, sel, file)
 		if err != nil {
-			if errors.Is(err, errFileTooLarge) {
-				continue
-			}
 			return err
 		}
 		*items = append(*items, item)
@@ -352,9 +339,6 @@ func (h *githubHandler) fetchChangesFor(ctx context.Context, cfg *githubConfig, 
 			if isSupportedFile(change.Filename) {
 				item, err := h.item(ctx, cfg, sel, change.Filename)
 				if err != nil {
-					if errors.Is(err, errFileTooLarge) {
-						continue
-					}
 					return err
 				}
 				*items = append(*items, item)
@@ -363,9 +347,6 @@ func (h *githubHandler) fetchChangesFor(ctx context.Context, cfg *githubConfig, 
 			if isSupportedFile(change.Filename) {
 				item, err := h.item(ctx, cfg, sel, change.Filename)
 				if err != nil {
-					if errors.Is(err, errFileTooLarge) {
-						continue
-					}
 					return err
 				}
 				*items = append(*items, item)
@@ -407,20 +388,34 @@ func (h *githubHandler) walkTree(ctx context.Context, cfg *githubConfig, sel rep
 }
 
 // item builds a FetchedItem for one repository file.
+//
+// Two deliberate choices, both aimed at never losing a file:
+//
+//   - Content the API withheld (>1 MiB) becomes a URL-only item: the host's
+//     ingestion treats "no content but a URL" as "download and parse it yourself".
+//     Failing the batch instead would wedge the repository on one oversized file.
+//   - A single file's fetch error becomes a failure placeholder (no content +
+//     Metadata["error"]) rather than aborting the batch. See failureItem.
 func (h *githubHandler) item(ctx context.Context, cfg *githubConfig, sel repoSelection, file string) (pluginapi.FetchedItem, error) {
-	body, err := h.fileContent(ctx, cfg, sel, file)
+	payload, err := h.fetchFile(ctx, cfg, sel, file)
 	if err != nil {
-		return pluginapi.FetchedItem{}, err
+		return failureItem(sel, file, err), nil
 	}
 	blobURL := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", sel.Owner, sel.Repo, sel.Branch, file)
+	// For content-less items the URL is what the host downloads, so it must point
+	// at raw bytes rather than at the human-facing blob page.
+	itemURL := blobURL
+	if len(payload.Content) == 0 {
+		itemURL = payload.DownloadURL
+	}
 	return pluginapi.FetchedItem{
 		ExternalID: "github:file:" + sel.Owner + ":" + sel.Repo + ":" + sel.Branch + ":" + file,
 		Title:      file,
 		FileName:   path.Base(file),
-		Content:    body,
+		Content:    payload.Content,
 		MIMEType:   mimeForPath(file),
 		UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
-		URL:        blobURL,
+		URL:        itemURL,
 		Metadata: map[string]string{
 			"owner":      sel.Owner,
 			"repo":       sel.Repo,
@@ -429,6 +424,22 @@ func (h *githubHandler) item(ctx context.Context, cfg *githubConfig, sel repoSel
 			"source_url": blobURL,
 		},
 	}, nil
+}
+
+// failureItem surfaces one file's failure without aborting the whole sync — the
+// same convention the built-in Yuque / Feishu connectors use for their partial
+// failures (an item with no content and Metadata["error"], which the ingestion
+// service counts as a failed document, writes to the sync log, and — because
+// result.Failed > 0 — refuses to advance the cursor, so the next incremental run
+// retries it). Aborting instead lets one unreadable file block every other file
+// forever; skipping silently loses it for good and reports success.
+func failureItem(sel repoSelection, file string, cause error) pluginapi.FetchedItem {
+	return pluginapi.FetchedItem{
+		ExternalID: "github:file:" + sel.Owner + ":" + sel.Repo + ":" + sel.Branch + ":" + file,
+		Title:      file,
+		FileName:   path.Base(file),
+		Metadata:   map[string]string{"path": file, "error": cause.Error()},
+	}
 }
 
 func deletedItem(sel repoSelection, file string) pluginapi.FetchedItem {
@@ -502,12 +513,20 @@ func (h *githubHandler) commitSHA(ctx context.Context, cfg *githubConfig, sel re
 	return out.SHA, nil
 }
 
-// fileContent returns the decoded bytes of a file at the given ref.
+// filePayload is the outcome of one file-content lookup: either inline bytes,
+// or a remote URL the host should download itself.
+type filePayload struct {
+	Content     []byte
+	DownloadURL string
+}
+
+// fetchFile resolves the content of a file at the given ref.
 //
-// GitHub Contents API returns "base64" for files up to 1 MiB, and "none" for
-// larger files (or files where content is omitted). For "none" we fetch the
-// raw bytes via download_url instead of failing.
-func (h *githubHandler) fileContent(ctx context.Context, cfg *githubConfig, sel repoSelection, file string) ([]byte, error) {
+// The GitHub Contents API returns "base64" for files up to 1 MiB and "none" for
+// larger ones (content withheld; only download_url is provided). For "none" we
+// hand the download URL back to the caller, which turns it into a URL-only item
+// the host downloads itself — see item() for why such files must not be dropped.
+func (h *githubHandler) fetchFile(ctx context.Context, cfg *githubConfig, sel repoSelection, file string) (filePayload, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/contents/%s",
 		url.PathEscape(sel.Owner), url.PathEscape(sel.Repo), escapePath(file))
 	q := url.Values{"ref": {sel.Branch}}
@@ -518,25 +537,24 @@ func (h *githubHandler) fileContent(ctx context.Context, cfg *githubConfig, sel 
 		DownloadURL string `json:"download_url"`
 	}
 	if err := h.getJSON(ctx, cfg, endpoint, q, &out); err != nil {
-		return nil, err
+		return filePayload{}, err
 	}
 
 	switch strings.ToLower(out.Encoding) {
 	case "base64", "":
 		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
 		if err != nil {
-			return nil, fmt.Errorf("github file %s: decode base64: %w", file, err)
+			return filePayload{}, fmt.Errorf("github file %s: decode base64: %w", file, err)
 		}
-		return decoded, nil
+		return filePayload{Content: decoded}, nil
 	case "none":
-		// encoding=none means the file is larger than 1 MiB and GitHub returned
-		// a download_url instead of inlined content. We skip such files rather
-		// than streaming the full body through the gRPC plugin boundary, which
-		// is bounded by the host's request timeout and would otherwise fail
-		// large files with a context deadline error.
-		return nil, errFileTooLarge
+		if strings.TrimSpace(out.DownloadURL) == "" {
+			return filePayload{}, fmt.Errorf(
+				"github file %s: the API withheld the content and returned no download_url", file)
+		}
+		return filePayload{DownloadURL: out.DownloadURL}, nil
 	default:
-		return nil, fmt.Errorf("github file %s: unsupported encoding %q", file, out.Encoding)
+		return filePayload{}, fmt.Errorf("github file %s: unsupported encoding %q", file, out.Encoding)
 	}
 }
 

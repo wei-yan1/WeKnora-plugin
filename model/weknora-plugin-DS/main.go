@@ -83,6 +83,19 @@ type dsModel struct {
 	http  *http.Client
 }
 
+// newOutboundHTTPClient 返回 SDK 的受控 HTTP 客户端：它读取宿主注入的网络策略
+// （WEKNORA_PLUGIN_NETWORK_POLICY / WEKNORA_PLUGIN_NETWORK_ALLOWLIST），在出站
+// 拨号前做白名单匹配与反 SSRF 校验，并对拒绝事件写审计日志。
+//
+// 切勿改回裸 &http.Client{}：那样 manifest 里的
+// permissions.network: allowlist + allowed_destinations 会形同虚设，插件将可以
+// 访问任意外网地址（模型插件指南"运行方式与网络声明"一节明确要求）。
+func newOutboundHTTPClient() *http.Client {
+	client := pluginapi.NewPluginHTTPClient()
+	client.Timeout = 5 * time.Minute
+	return client
+}
+
 func main() {
 	addr := os.Getenv("WEKNORA_PLUGIN_ADDR")
 	if addr == "" {
@@ -91,7 +104,7 @@ func main() {
 
 	m := &dsModel{
 		store: newConfigStore(),
-		http:  &http.Client{Timeout: 5 * time.Minute},
+		http:  newOutboundHTTPClient(),
 	}
 
 	handler := pluginapi.ModelHandler{
